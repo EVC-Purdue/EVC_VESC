@@ -35,24 +35,28 @@
 #define HW_HAS_PHASE_SHUNTS
 
 // Macros
-#define ENABLE_GATE()			palSetPad(GPIOB, 5)
-#define DISABLE_GATE()			palClearPad(GPIOB, 5)
+#define ENABLE_GATE()			palSetPad(GPIOC, 9)
+#define DISABLE_GATE()			palClearPad(GPIOC, 9)
+#define ENABLE_PRECHARGE()      palSetPad(GPIOE, 6)
+#define DISABLE_PRECHARGE()     palClearPad(GPIOE, 6)
+#define ENABLE_MAIN_COIL()      palSetPad(GPIOE, 5)
+#define DISABLE_MAIN_COIL()     palClearPad(GPIOE, 5)
 #define DCCAL_ON()
 #define DCCAL_OFF()
-#define IS_DRV_FAULT()			(!palReadPad(GPIOB, 7))
+#define IS_DRV_FAULT()			(!palReadPad(GPIOB, 12)) // check if there a better flag to use for hardware fault
 
-#define PHASE_FILTER_GPIO		GPIOC
-#define PHASE_FILTER_PIN		13
+#define PHASE_FILTER_GPIO		GPIOE
+#define PHASE_FILTER_PIN		7
 #define PHASE_FILTER_ON()		palSetPad(PHASE_FILTER_GPIO, PHASE_FILTER_PIN)
 #define PHASE_FILTER_OFF()		palClearPad(PHASE_FILTER_GPIO, PHASE_FILTER_PIN)
 
 #define CURRENT_FILTER_ON()		palSetPad(GPIOD, 2)
 #define CURRENT_FILTER_OFF()	palClearPad(GPIOD, 2)
 
-#define LED_GREEN_GPIO			GPIOB
-#define LED_GREEN_PIN			0
-#define LED_RED_GPIO			GPIOB
-#define LED_RED_PIN				1
+#define LED_GREEN_GPIO			GPIOE
+#define LED_GREEN_PIN			14
+#define LED_RED_GPIO			GPIOE
+#define LED_RED_PIN				15
 #define LED_GREEN_ON()			palSetPad(LED_GREEN_GPIO, LED_GREEN_PIN)
 #define LED_GREEN_OFF()			palClearPad(LED_GREEN_GPIO, LED_GREEN_PIN)
 #define LED_RED_ON()			palSetPad(LED_RED_GPIO, LED_RED_PIN)
@@ -243,6 +247,7 @@
 #define HW_LIM_CURRENT_IN		-120.0, 120.0
 #define HW_LIM_CURRENT_ABS		0.0, 160.0
 #define HW_LIM_VIN				6.0, 57.0
+#define HW_LIM_VIN_MIN          6.0
 #define HW_LIM_ERPM				-200e3, 200e3
 #define HW_LIM_DUTY_MIN			0.0, 0.1
 #define HW_LIM_DUTY_MAX			0.0, 0.99
