@@ -117,7 +117,57 @@ void hw_init_gpio(void) {
 	palSetPadMode(GPIOC, 4, PAL_MODE_INPUT_ANALOG);
 
 	drv8301_init();
+
+	static THD_FUNCTION(precharge_thread, arg) {
+		(void)arg;
+		chRegSetThreadName("precharge_thread");
+
+		while (precharge_state == BOOTED || precharge_state == PRECHARGING) {
+			switch (precharge_state) {
+			case BOOTED:
+				precharge_state = PRECHARGING;
+				break;
+
+			case PRECHARGING:
+				mc_interface_set_current(0);
+				mc_interface_lock();
+				int cts = 0;
+				//check if ADCS are active and working
+				while((ADC_Value[ADC_IND_VIN_SENS] < 1) && (cts < 50)){
+					chThdSleepMilliseconds(100);
+					cts++;
+				}
+				if (GET_INPUT_VOLTAGE() > 1) {
+					precharge_state = PRECHARGE_FAILED;
+					break;
+				}
+				ENABLE_PRECHARGE();
+				cts = 0;
+				float rate = 100.0;
+				float last_voltage = GET_INPUT_VOLTAGE();
+				//Wait for precharge resistors to precharge bulk caps
+				while((GET_INPUT_VOLTAGE() < HW_LIM_VIN_MIN) && (cts < 50) && (rate > HW_MAX_PRECHARGE_RATE)){
+					rate = ((GET_INPUT_VOLTAGE() - last_voltage) / 0.1);
+					chThdSleepMilliseconds(100);
+					last_voltage = GET_INPUT_VOLTAGE();
+					cts++;
+				}
+				if (cts >= 50) {
+					precharge_state = PRECHARGE_FAILED;
+					DISABLE_PRECHARGE();
+					break;
+				}
+				ENABLE_MAIN_COIL();
+				chThdSleepMilliseconds(100);
+				DISABLE_PRECHARGE();
+				mc_interface_unlock();
+				precharge_state = PRECHARGED;
+				break;
+			}
+		}
+	}
 }
+
 
 void hw_setup_adc_channels(void) {
 	uint8_t t_samp = ADC_SampleTime_15Cycles;
