@@ -38,6 +38,17 @@ static const I2CConfig i2cfg = {
 		STD_DUTY_CYCLE
 };
 
+typedef enum {
+	BOOTED = 0,
+	PRECHARGING,
+	PRECHARGED,
+	PRECHARGE_FAILED
+} precharge_state_t;
+
+static volatile precharge_state_t precharge_state = BOOTED;
+
+static THD_WORKING_AREA(precharge_thread_wa, 128);
+static THD_FUNCTION(precharge_thread, arg);
 
 void hw_init_gpio(void) {
 	// GPIO clock enable
@@ -55,11 +66,15 @@ void hw_init_gpio(void) {
 			PAL_STM32_OSPEED_HIGHEST);
 
 	// ENABLE_GATE
-	palSetPadMode(GPIOB, 5,
+	palSetPadMode(GPIOC, 9,
 			PAL_MODE_OUTPUT_PUSHPULL |
 			PAL_STM32_OSPEED_HIGHEST);
 
-	ENABLE_GATE();
+	// PRECHARGE and CONTACTOR
+	palSetPadMode(GPIOE, 5,
+			PAL_MODE_OUTPUT_PUSHPULL);
+	palSetPadMode(GPIOE, 6,
+			PAL_MODE_OUTPUT_PUSHPULL);
 	
 	// Current filter
 	palSetPadMode(GPIOD, 2,
@@ -73,7 +88,7 @@ void hw_init_gpio(void) {
 			PAL_STM32_OSPEED_HIGHEST);
 	PHASE_FILTER_OFF();
 
-	// GPIOA Configuration: Channel 1 to 3 as alternate function push-pull
+	// GPIOA/B Configuration: Channel 1 to 3 as alternate function push-pull
 	palSetPadMode(GPIOA, 8, PAL_MODE_ALTERNATE(GPIO_AF_TIM1) |
 			PAL_STM32_OSPEED_HIGHEST |
 			PAL_STM32_PUDR_FLOATING);
@@ -94,76 +109,90 @@ void hw_init_gpio(void) {
 			PAL_STM32_OSPEED_HIGHEST |
 			PAL_STM32_PUDR_FLOATING);
 
-	// Hall sensors
-	palSetPadMode(HW_HALL_ENC_GPIO1, HW_HALL_ENC_PIN1, PAL_MODE_INPUT_PULLUP);
-	palSetPadMode(HW_HALL_ENC_GPIO2, HW_HALL_ENC_PIN2, PAL_MODE_INPUT_PULLUP);
-	palSetPadMode(HW_HALL_ENC_GPIO3, HW_HALL_ENC_PIN3, PAL_MODE_INPUT_PULLUP);
+	// Hall sensors. If EVC Logic board has 5V pullups populated, MUST be HI-Z
+	palSetPadMode(HW_HALL_ENC_GPIO1, HW_HALL_ENC_PIN1, PAL_MODE_INPUT);
+	palSetPadMode(HW_HALL_ENC_GPIO2, HW_HALL_ENC_PIN2, PAL_MODE_INPUT);
+	palSetPadMode(HW_HALL_ENC_GPIO3, HW_HALL_ENC_PIN3, PAL_MODE_INPUT);
 
 	// Fault pin
-	palSetPadMode(GPIOB, 7, PAL_MODE_INPUT_PULLUP);
+	palSetPadMode(GPIOB, 12, PAL_MODE_INPUT);
 
 	// ADC Pins
-	palSetPadMode(GPIOA, 0, PAL_MODE_INPUT_ANALOG);
-	palSetPadMode(GPIOA, 1, PAL_MODE_INPUT_ANALOG);
-	palSetPadMode(GPIOA, 2, PAL_MODE_INPUT_ANALOG);
-	palSetPadMode(GPIOA, 3, PAL_MODE_INPUT_ANALOG);
-	palSetPadMode(GPIOA, 5, PAL_MODE_INPUT_ANALOG);
-	palSetPadMode(GPIOA, 6, PAL_MODE_INPUT_ANALOG);
+	palSetPadMode(GPIOA, 0, PAL_MODE_INPUT_ANALOG); // P1V
+	palSetPadMode(GPIOA, 1, PAL_MODE_INPUT_ANALOG); // P2V
+	palSetPadMode(GPIOA, 2, PAL_MODE_INPUT_ANALOG); // P3V
+	palSetPadMode(GPIOA, 3, PAL_MODE_INPUT_ANALOG); // MOS1 temp
+	palSetPadMode(GPIOA, 5, PAL_MODE_INPUT_ANALOG); // ADC1 EXT
+	palSetPadMode(GPIOA, 6, PAL_MODE_INPUT_ANALOG); // ADC2 EXT
 
-	palSetPadMode(GPIOC, 0, PAL_MODE_INPUT_ANALOG);
-	palSetPadMode(GPIOC, 1, PAL_MODE_INPUT_ANALOG);
-	palSetPadMode(GPIOC, 2, PAL_MODE_INPUT_ANALOG);
-	palSetPadMode(GPIOC, 3, PAL_MODE_INPUT_ANALOG);
-	palSetPadMode(GPIOC, 4, PAL_MODE_INPUT_ANALOG);
+	palSetPadMode(GPIOB, 0, PAL_MODE_INPUT_ANALOG); // MOS2 temp
+	palSetPadMode(GPIOB, 1, PAL_MODE_INPUT_ANALOG); // MOS3 temp
 
-	drv8301_init();
+	palSetPadMode(GPIOC, 0, PAL_MODE_INPUT_ANALOG); // p1I
+	palSetPadMode(GPIOC, 1, PAL_MODE_INPUT_ANALOG); // p2I
+	palSetPadMode(GPIOC, 2, PAL_MODE_INPUT_ANALOG); // p3I
+	palSetPadMode(GPIOC, 3, PAL_MODE_INPUT_ANALOG); // VBAT
+	palSetPadMode(GPIOC, 4, PAL_MODE_INPUT_ANALOG); // MOT temp
 
-	static THD_FUNCTION(precharge_thread, arg) {
-		(void)arg;
-		chRegSetThreadName("precharge_thread");
+}
 
-		while (precharge_state == BOOTED || precharge_state == PRECHARGING) {
-			switch (precharge_state) {
-			case BOOTED:
-				precharge_state = PRECHARGING;
-				break;
 
-			case PRECHARGING:
-				mc_interface_set_current(0);
-				mc_interface_lock();
-				int cts = 0;
-				//check if ADCS are active and working
-				while((ADC_Value[ADC_IND_VIN_SENS] < 1) && (cts < 50)){
-					chThdSleepMilliseconds(100);
-					cts++;
-				}
-				if (GET_INPUT_VOLTAGE() > 1) {
-					precharge_state = PRECHARGE_FAILED;
-					break;
-				}
-				ENABLE_PRECHARGE();
-				cts = 0;
-				float rate = 100.0;
-				float last_voltage = GET_INPUT_VOLTAGE();
-				//Wait for precharge resistors to precharge bulk caps
-				while((GET_INPUT_VOLTAGE() < HW_LIM_VIN_MIN) && (cts < 50) && (rate > HW_MAX_PRECHARGE_RATE)){
-					rate = ((GET_INPUT_VOLTAGE() - last_voltage) / 0.1);
-					chThdSleepMilliseconds(100);
-					last_voltage = GET_INPUT_VOLTAGE();
-					cts++;
-				}
-				if (cts >= 50) {
-					precharge_state = PRECHARGE_FAILED;
-					DISABLE_PRECHARGE();
-					break;
-				}
-				ENABLE_MAIN_COIL();
+static THD_FUNCTION(precharge_thread, arg) {
+	(void)arg;
+	chRegSetThreadName("precharge_thread");
+
+	while (precharge_state == BOOTED || precharge_state == PRECHARGING) {
+		switch (precharge_state) {
+		case BOOTED:
+			precharge_state = PRECHARGING;
+			break;
+
+		case PRECHARGING:
+			mc_interface_set_current(0);
+			mc_interface_lock();
+			DISABLE_GATE();
+			int cts = 0;
+			//check if ADCS are active and working
+			while((ADC_Value[ADC_IND_VIN_SENS] < 1) && (cts < 50)){
 				chThdSleepMilliseconds(100);
-				DISABLE_PRECHARGE();
-				mc_interface_unlock();
-				precharge_state = PRECHARGED;
+				cts++;
+			}
+			if (GET_INPUT_VOLTAGE() > 20.0) {
+				precharge_state = PRECHARGE_FAILED;
 				break;
 			}
+			ENABLE_PRECHARGE();
+			cts = 0;
+			float rate = 100.0;
+			float last_voltage = GET_INPUT_VOLTAGE();
+			//Wait for precharge resistors to precharge bulk caps
+			while(((GET_INPUT_VOLTAGE() < HW_LIM_VIN_MIN) || (rate > HW_PRECHARGE_DONE_RATE)) && (cts < 50)){
+				rate = ((GET_INPUT_VOLTAGE() - last_voltage) / 0.1);
+				chThdSleepMilliseconds(100);
+				last_voltage = GET_INPUT_VOLTAGE();
+				cts++;
+			}
+			if (cts >= 50) {
+				precharge_state = PRECHARGE_FAILED;
+				DISABLE_PRECHARGE();
+				break;
+			}
+			ENABLE_MAIN_COIL();
+			chThdSleepMilliseconds(100);
+			DISABLE_PRECHARGE();
+			chThdSleepMilliseconds(100);
+
+			//confirm contactor close
+			if (GET_INPUT_VOLTAGE() < last_voltage) {
+				precharge_state = PRECHARGE_FAILED;
+				DISABLE_MAIN_COIL();
+				break;
+			}
+
+			mc_interface_unlock();
+			ENABLE_GATE();
+			precharge_state = PRECHARGED;
+			break;
 		}
 	}
 }
@@ -173,36 +202,39 @@ void hw_setup_adc_channels(void) {
 	uint8_t t_samp = ADC_SampleTime_15Cycles;
 
 	// ADC1 regular channels
-	ADC_RegularChannelConfig(ADC1, ADC_Channel_10, 1, t_samp);
-	ADC_RegularChannelConfig(ADC1, ADC_Channel_0, 2, t_samp);
-	ADC_RegularChannelConfig(ADC1, ADC_Channel_5, 3, t_samp);
-	ADC_RegularChannelConfig(ADC1, ADC_Channel_14, 4, t_samp);
-	ADC_RegularChannelConfig(ADC1, ADC_Channel_Vrefint, 5, t_samp);
+	ADC_RegularChannelConfig(ADC1, ADC_Channel_10, 1, t_samp); // p1I index 0
+	ADC_RegularChannelConfig(ADC1, ADC_Channel_0, 2, t_samp); //p1V index 3
+	ADC_RegularChannelConfig(ADC1, ADC_Channel_5, 3, t_samp); // ADC1 EXT index 6
+	ADC_RegularChannelConfig(ADC1, ADC_Channel_14, 4, t_samp); // mot tmp index 9
+	ADC_RegularChannelConfig(ADC1, ADC_Channel_Vrefint, 5, t_samp); // Vref index 12
 
 	// ADC2 regular channels
-	ADC_RegularChannelConfig(ADC2, ADC_Channel_11, 1, t_samp);
-	ADC_RegularChannelConfig(ADC2, ADC_Channel_1, 2, t_samp);
-	ADC_RegularChannelConfig(ADC2, ADC_Channel_6, 3, t_samp);
-	ADC_RegularChannelConfig(ADC2, ADC_Channel_15, 4, t_samp);
-	ADC_RegularChannelConfig(ADC2, ADC_Channel_0, 5, t_samp);
+	ADC_RegularChannelConfig(ADC2, ADC_Channel_11, 1, t_samp); // p2I index 1
+	ADC_RegularChannelConfig(ADC2, ADC_Channel_1, 2, t_samp); // p2V index 4
+	ADC_RegularChannelConfig(ADC2, ADC_Channel_6, 3, t_samp); // ADC2 EXT index 7
+	ADC_RegularChannelConfig(ADC2, ADC_Channel_8, 4, t_samp); // MOS2 temp index 10
+	ADC_RegularChannelConfig(ADC2, ADC_Channel_9, 5, t_samp); // MOS3 temp index 13
 
 	// ADC3 regular channels
-	ADC_RegularChannelConfig(ADC3, ADC_Channel_12, 1, t_samp);
-	ADC_RegularChannelConfig(ADC3, ADC_Channel_2, 2, t_samp);
-	ADC_RegularChannelConfig(ADC3, ADC_Channel_3, 3, t_samp);
-	ADC_RegularChannelConfig(ADC3, ADC_Channel_13, 4, t_samp);
-	ADC_RegularChannelConfig(ADC3, ADC_Channel_1, 5, t_samp);
+	ADC_RegularChannelConfig(ADC3, ADC_Channel_12, 1, t_samp); // p3I index 2
+	ADC_RegularChannelConfig(ADC3, ADC_Channel_2, 2, t_samp); // p3V index 5
+	ADC_RegularChannelConfig(ADC3, ADC_Channel_3, 3, t_samp); // MOS1 tmp index 8
+	ADC_RegularChannelConfig(ADC3, ADC_Channel_13, 4, t_samp); // VBAT index 11
+	ADC_RegularChannelConfig(ADC3, ADC_Channel_12, 5, t_samp); // p2I duplicate for alignment index 14
 
 	// Injected channels
-	ADC_InjectedChannelConfig(ADC1, ADC_Channel_10, 1, t_samp);
-	ADC_InjectedChannelConfig(ADC2, ADC_Channel_11, 1, t_samp);
-	ADC_InjectedChannelConfig(ADC3, ADC_Channel_12, 1, t_samp);
-	ADC_InjectedChannelConfig(ADC1, ADC_Channel_10, 2, t_samp);
-	ADC_InjectedChannelConfig(ADC2, ADC_Channel_11, 2, t_samp);
-	ADC_InjectedChannelConfig(ADC3, ADC_Channel_12, 2, t_samp);
-	ADC_InjectedChannelConfig(ADC1, ADC_Channel_10, 3, t_samp);
-	ADC_InjectedChannelConfig(ADC2, ADC_Channel_11, 3, t_samp);
-	ADC_InjectedChannelConfig(ADC3, ADC_Channel_12, 3, t_samp);
+	ADC_InjectedChannelConfig(ADC1, ADC_Channel_10, 1, t_samp); // p1I
+	ADC_InjectedChannelConfig(ADC2, ADC_Channel_11, 1, t_samp); // p2I
+	ADC_InjectedChannelConfig(ADC3, ADC_Channel_12, 1, t_samp); // p3I
+	ADC_InjectedChannelConfig(ADC1, ADC_Channel_10, 2, t_samp); // p1I
+	ADC_InjectedChannelConfig(ADC2, ADC_Channel_11, 2, t_samp); // p2I
+	ADC_InjectedChannelConfig(ADC3, ADC_Channel_12, 2, t_samp); // p3I
+	ADC_InjectedChannelConfig(ADC1, ADC_Channel_10, 3, t_samp); // p1I
+	ADC_InjectedChannelConfig(ADC2, ADC_Channel_11, 3, t_samp); // p2I
+	ADC_InjectedChannelConfig(ADC3, ADC_Channel_12, 3, t_samp); // p3I
+
+	chThdCreateStatic(precharge_thread_wa, sizeof(precharge_thread_wa),
+			NORMALPRIO, precharge_thread, NULL);
 }
 
 void hw_start_i2c(void) {

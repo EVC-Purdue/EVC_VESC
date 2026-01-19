@@ -20,7 +20,7 @@
 #ifndef HW_EVC_CORE_H_
 #define HW_EVC_CORE_H_
 
-#ifdef HW_EVC_IS_MK1
+#ifdef HW_EVC_IS_REV1
 #define HW_NAME					"EVC_Controller REV1"
 #else
 #error "Must include hardware type"
@@ -63,7 +63,7 @@
 #define LED_RED_OFF()			palClearPad(LED_RED_GPIO, LED_RED_PIN)
 
 /*
- * ADC Vector
+ * ADC Vector jack fucked this up comment probably wrong
  *
  * 0:	IN10	CURR1
  * 1:	IN11	CURR2
@@ -97,29 +97,30 @@
 #define ADC_IND_EXT				6
 #define ADC_IND_EXT2			7
 //#define ADC_IND_ADC_MUX			15
-#define ADC_IND_TEMP_MOTOR		18
+#define ADC_IND_VREFINT        12
 #define ADC_IND_TEMP_MOS		8
-#define ADC_IND_TEMP_MOS_2		21 // Caps
-#define ADC_IND_TEMP_MOS_3		24
+#define ADC_IND_TEMP_MOTOR		9
+#define ADC_IND_TEMP_MOS_2		10
+#define ADC_IND_TEMP_MOS_3		13
 
 
 // ADC macros and settings
 
 // Component parameters (can be overridden)
 #ifndef V_REG
-#define V_REG					3.3
+#define V_REG					3.3 //TODO: maybe update using vrefint?
 #endif
 #ifndef VIN_R1
-#define VIN_R1					39000.0
+#define VIN_R1					250000.0
 #endif
 #ifndef VIN_R2
 #define VIN_R2					2200.0
 #endif
 #ifndef CURRENT_AMP_GAIN
-#define CURRENT_AMP_GAIN		20.0
+#define CURRENT_AMP_GAIN		0.7186 // output divider
 #endif
 #ifndef CURRENT_SHUNT_RES
-#define CURRENT_SHUNT_RES		0.0005
+#define CURRENT_SHUNT_RES		0.0025 // effective with 2.5 mV/A after bypass shunt
 #endif
 
 // Input voltage
@@ -152,10 +153,9 @@
 // Permanent UART Peripheral
 #define HW_UART_P_BAUD			115200
 #define HW_UART_P_DEV			SD4
-#define HW_UART_P_DEV_TX		SD5 // UART for TX, due to mistake below
 #define HW_UART_P_GPIO_AF		GPIO_AF_UART4
 #define HW_UART_P_TX_PORT		GPIOC
-#define HW_UART_P_TX_PIN		12 // This is a mistake in the HW. We have to use a hack to use UART5.
+#define HW_UART_P_TX_PIN		10
 #define HW_UART_P_RX_PORT		GPIOC
 #define HW_UART_P_RX_PIN		11
 
@@ -166,8 +166,8 @@
 #define HW_ICU_DEV				ICUD4
 #define HW_ICU_CHANNEL			ICU_CHANNEL_1
 #define HW_ICU_GPIO_AF			GPIO_AF_TIM4
-#define HW_ICU_GPIO				GPIOB
-#define HW_ICU_PIN				6
+#define HW_ICU_GPIO				GPIOD
+#define HW_ICU_PIN				12
 
 // I2C Peripheral
 #define HW_I2C_DEV				I2CD2
@@ -252,6 +252,7 @@
 #define HW_LIM_DUTY_MIN			0.0, 0.1
 #define HW_LIM_DUTY_MAX			0.0, 0.99
 #define HW_LIM_TEMP_FET			-40.0, 110.0
+#define HW_PRECHARGE_DONE_RATE		5.0		// V/s
 
 #endif /* HW_EVC_CORE_H_ */
 
