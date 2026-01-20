@@ -365,6 +365,10 @@
 
 /** BMI160 unique chip identifier */
 #define BMI160_CHIP_ID                       UINT8_C(0xD1)
+#define BMI270_CHIP_ID                       UINT8_C(0x24)
+
+#define BMI270_PWR_CTRL_ADDR                 UINT8_C(0x7D)
+#define BMI270_PWR_CONF_ADDR                 UINT8_C(0x7C)
 
 /** Soft reset command */
 #define BMI160_SOFT_RESET_CMD                UINT8_C(0xb6)

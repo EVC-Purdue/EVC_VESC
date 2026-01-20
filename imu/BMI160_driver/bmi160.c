@@ -1473,17 +1473,43 @@ int8_t bmi160_init(struct bmi160_dev *dev)
     {
         /* Assign chip id as zero */
         dev->chip_id = 0;
-        while ((try--) && (dev->chip_id != BMI160_CHIP_ID))
+        int try_chk = 0;
+        
+        while (try_chk < 6 && (dev->chip_id != BMI160_CHIP_ID) && (dev->chip_id != BMI270_CHIP_ID))
         {
+            if (dev->interface == BMI160_I2C_INTF && try_chk == 3) {
+                 if (dev->id == 0x68) dev->id = 0x69;
+                 else if (dev->id == 0x69) dev->id = 0x68;
+            }
+
             /* Read chip_id */
             rslt = bmi160_get_regs(BMI160_CHIP_ID_ADDR, &dev->chip_id, 1, dev);
+            try_chk++;
+            dev->delay_ms(1);
         }
-        if ((rslt == BMI160_OK) && (dev->chip_id == BMI160_CHIP_ID))
+        
+        if ((rslt == BMI160_OK) && ((dev->chip_id == BMI160_CHIP_ID) || (dev->chip_id == BMI270_CHIP_ID)))
         {
+            /* Enable PWR_CONF (disable Adv Power Save) for BMI270 */
+            if (dev->chip_id == BMI270_CHIP_ID) {
+                uint8_t pwr_conf = 0x00;
+                rslt = bmi160_set_regs(BMI270_PWR_CONF_ADDR, &pwr_conf, 1, dev);
+                dev->delay_ms(10);
+            }
+
             dev->any_sig_sel = BMI160_BOTH_ANY_SIG_MOTION_DISABLED;
 
             /* Soft reset */
             rslt = bmi160_soft_reset(dev);
+            
+            /* Enable PWR_CONF (disable Adv Power Save) for BMI270 after Reset */
+            if (dev->chip_id == BMI270_CHIP_ID) {
+                // Wait somewhat longer after reset for BMI270
+                dev->delay_ms(10); 
+                uint8_t pwr_conf = 0x00;
+                rslt = bmi160_set_regs(BMI270_PWR_CONF_ADDR, &pwr_conf, 1, dev);
+                dev->delay_ms(10);
+            }
         }
         else
         {
@@ -1513,6 +1539,9 @@ int8_t bmi160_soft_reset(struct bmi160_dev *dev)
         /* Reset the device */
         rslt = bmi160_set_regs(BMI160_COMMAND_REG_ADDR, &data, 1, dev);
         dev->delay_ms(BMI160_SOFT_RESET_DELAY_MS);
+        if (dev->chip_id == BMI270_CHIP_ID) {
+            dev->delay_ms(50); // Extra delay for BMI270
+        }
         if ((rslt == BMI160_OK) && (dev->interface == BMI160_SPI_INTF))
         {
             /* Dummy read of 0x7F register to enable SPI Interface
@@ -1602,13 +1631,35 @@ int8_t bmi160_get_power_mode(struct bmi160_pmu_status *pmu_status, const struct 
     }
     else
     {
-        rslt = bmi160_get_regs(BMI160_PMU_STATUS_ADDR, &power_mode, 1, dev);
-        if (rslt == BMI160_OK)
-        {
-            /* Power mode of the accel,gyro,aux sensor is obtained */
-            pmu_status->aux_pmu_status = BMI160_GET_BITS_POS_0(power_mode, BMI160_MAG_POWER_MODE);
-            pmu_status->gyro_pmu_status = BMI160_GET_BITS(power_mode, BMI160_GYRO_POWER_MODE);
-            pmu_status->accel_pmu_status = BMI160_GET_BITS(power_mode, BMI160_ACCEL_POWER_MODE);
+        if (dev->chip_id == BMI270_CHIP_ID) {
+            rslt = bmi160_get_regs(BMI270_PWR_CTRL_ADDR, &power_mode, 1, dev);
+            if (rslt == BMI160_OK) {
+                // Map PWR_CTRL bits to PMU_STATUS format for compatibility
+                // ERR_REG(0x02) STATUS(0x03) ... PWR_CTRL(0x7D)
+                
+                // BMI160 PMU_STATUS: [5:4] gyro, [3:2] accel, [1:0] mag
+                // 00=suspend, 01=normal, 11=fast_startup
+                
+                // BMI270 PWR_CTRL: [2] acc_en, [1] gyr_en, [0] aux_en
+                // 1=en(normal), 0=dis(suspend)
+                
+                uint8_t acc_st = (power_mode & 0x04) ? 1 : 0;
+                uint8_t gyr_st = (power_mode & 0x02) ? 1 : 0;
+                uint8_t aux_st = (power_mode & 0x01) ? 1 : 0; // Using mag fields for aux?
+
+                pmu_status->accel_pmu_status = acc_st; 
+                pmu_status->gyro_pmu_status = gyr_st;
+                pmu_status->aux_pmu_status = aux_st;
+            }
+        } else {
+            rslt = bmi160_get_regs(BMI160_PMU_STATUS_ADDR, &power_mode, 1, dev);
+            if (rslt == BMI160_OK)
+            {
+                /* Power mode of the accel,gyro,aux sensor is obtained */
+                pmu_status->aux_pmu_status = BMI160_GET_BITS_POS_0(power_mode, BMI160_MAG_POWER_MODE);
+                pmu_status->gyro_pmu_status = BMI160_GET_BITS(power_mode, BMI160_GYRO_POWER_MODE);
+                pmu_status->accel_pmu_status = BMI160_GET_BITS(power_mode, BMI160_ACCEL_POWER_MODE);
+            }
         }
     }
 
@@ -3419,6 +3470,28 @@ static int8_t set_accel_pwr(struct bmi160_dev *dev)
     int8_t rslt = 0;
     uint8_t data = 0;
 
+    if (dev->chip_id == BMI270_CHIP_ID) {
+        if ((dev->accel_cfg.power >= BMI160_ACCEL_SUSPEND_MODE) && (dev->accel_cfg.power <= BMI160_ACCEL_LOWPOWER_MODE))
+        {
+             if (dev->accel_cfg.power != dev->prev_accel_cfg.power) {
+                 rslt = bmi160_get_regs(BMI270_PWR_CTRL_ADDR, &data, 1, dev);
+                 if (rslt == BMI160_OK) {
+                     if (dev->accel_cfg.power == BMI160_ACCEL_NORMAL_MODE || dev->accel_cfg.power == BMI160_ACCEL_LOWPOWER_MODE) {
+                         data |= (1 << 2); // Enable Accel
+                     } else {
+                         data &= ~(1 << 2); // Disable Accel
+                     }
+                      rslt = bmi160_set_regs(BMI270_PWR_CTRL_ADDR, &data, 1, dev);
+                      if (rslt == BMI160_OK) {
+                          dev->delay_ms(BMI160_ACCEL_DELAY_MS);
+                          dev->prev_accel_cfg.power = dev->accel_cfg.power;
+                      }
+                 }
+             }
+        }
+        return rslt;
+    }
+
     if ((dev->accel_cfg.power >= BMI160_ACCEL_SUSPEND_MODE) && (dev->accel_cfg.power <= BMI160_ACCEL_LOWPOWER_MODE))
     {
         if (dev->accel_cfg.power != dev->prev_accel_cfg.power)
@@ -3501,6 +3574,30 @@ static int8_t process_under_sampling(uint8_t *data, const struct bmi160_dev *dev
 static int8_t set_gyro_pwr(struct bmi160_dev *dev)
 {
     int8_t rslt = 0;
+    uint8_t data = 0;
+
+    if (dev->chip_id == BMI270_CHIP_ID) {
+        if ((dev->gyro_cfg.power == BMI160_GYRO_SUSPEND_MODE) || (dev->gyro_cfg.power == BMI160_GYRO_NORMAL_MODE) ||
+        (dev->gyro_cfg.power == BMI160_GYRO_FASTSTARTUP_MODE))
+        {
+             if (dev->gyro_cfg.power != dev->prev_gyro_cfg.power) {
+                 rslt = bmi160_get_regs(BMI270_PWR_CTRL_ADDR, &data, 1, dev);
+                 if (rslt == BMI160_OK) {
+                     if (dev->gyro_cfg.power == BMI160_GYRO_NORMAL_MODE || dev->gyro_cfg.power == BMI160_GYRO_FASTSTARTUP_MODE) {
+                         data |= (1 << 1); // Enable Gyro
+                     } else {
+                         data &= ~(1 << 1); // Disable Gyro
+                     }
+                      rslt = bmi160_set_regs(BMI270_PWR_CTRL_ADDR, &data, 1, dev);
+                      if (rslt == BMI160_OK) {
+                          dev->delay_ms(BMI160_GYRO_DELAY_MS);
+                          dev->prev_gyro_cfg.power = dev->gyro_cfg.power;
+                      }
+                 }
+             }
+        }
+        return rslt;
+    }
 
     if ((dev->gyro_cfg.power == BMI160_GYRO_SUSPEND_MODE) || (dev->gyro_cfg.power == BMI160_GYRO_NORMAL_MODE) ||
         (dev->gyro_cfg.power == BMI160_GYRO_FASTSTARTUP_MODE))
@@ -3690,32 +3787,42 @@ static int8_t get_accel_gyro_data(uint8_t len,
     rslt = bmi160_get_regs(BMI160_GYRO_DATA_ADDR, data_array, 12 + len, dev);
     if (rslt == BMI160_OK)
     {
-        /* Gyro Data */
+        struct bmi160_sensor_data *val_1 = gyro;
+        struct bmi160_sensor_data *val_2 = accel;
+
+        if (dev->chip_id == BMI270_CHIP_ID) {
+            val_1 = accel;
+            val_2 = gyro;
+        }
+
+        /* First Data Group */
         lsb = data_array[idx++];
         msb = data_array[idx++];
         msblsb = (int16_t)((msb << 8) | lsb);
-        gyro->x = msblsb; /* gyro X axis data */
+        val_1->x = msblsb; 
         lsb = data_array[idx++];
         msb = data_array[idx++];
         msblsb = (int16_t)((msb << 8) | lsb);
-        gyro->y = msblsb; /* gyro Y axis data */
+        val_1->y = msblsb; 
         lsb = data_array[idx++];
         msb = data_array[idx++];
         msblsb = (int16_t)((msb << 8) | lsb);
-        gyro->z = msblsb; /* gyro Z axis data */
-        /* Accel Data */
+        val_1->z = msblsb; 
+
+        /* Second Data Group */
         lsb = data_array[idx++];
         msb = data_array[idx++];
         msblsb = (int16_t)((msb << 8) | lsb);
-        accel->x = (int16_t)msblsb; /* accel X axis data */
+        val_2->x = (int16_t)msblsb; 
         lsb = data_array[idx++];
         msb = data_array[idx++];
         msblsb = (int16_t)((msb << 8) | lsb);
-        accel->y = (int16_t)msblsb; /* accel Y axis data */
+        val_2->y = (int16_t)msblsb; 
         lsb = data_array[idx++];
         msb = data_array[idx++];
         msblsb = (int16_t)((msb << 8) | lsb);
-        accel->z = (int16_t)msblsb; /* accel Z axis data */
+        val_2->z = (int16_t)msblsb; 
+        
         if (len == 3)
         {
             time_0 = data_array[idx++];
