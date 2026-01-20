@@ -25,7 +25,7 @@
 #include "hal.h"
 #include "stm32f4xx_conf.h"
 #include "utils_math.h"
-#include "drv8301.h"
+// #include "drv8301.h"
 #include "terminal.h"
 #include "commands.h"
 #include "mc_interface.h"
@@ -203,6 +203,18 @@ static THD_FUNCTION(precharge_thread, arg) {
 			mc_interface_unlock();
 			ENABLE_GATE();
 			precharge_state = PRECHARGED;
+			break;
+		case PRECHARGED:
+			// Should not be here
+			chThdSleepMilliseconds(100);
+			break;
+		case PRECHARGE_FAILED:
+			// Should not be here
+			chThdSleepMilliseconds(100);
+			break;
+		default:
+			// Should not be here
+			chThdSleepMilliseconds(100);
 			break;
 		}
 	}
