@@ -82,6 +82,15 @@ void hw_init_gpio(void) {
 			PAL_STM32_OSPEED_HIGHEST);
 	CURRENT_FILTER_OFF();
 
+	// Clear curr fault detect
+	palSetPadMode(GPIOD, 7, PAL_MODE_INPUT);
+
+	// Hall filter
+	palSetPadMode(HALL_FILTER_GPIO, HALL_FILTER_PIN,
+			PAL_MODE_OUTPUT_PUSHPULL |
+			PAL_STM32_OSPEED_HIGHEST);
+	HALL_FILTER_ON();
+
 	// Phase filters
 	palSetPadMode(PHASE_FILTER_GPIO, PHASE_FILTER_PIN,
 			PAL_MODE_OUTPUT_PUSHPULL |

@@ -53,6 +53,11 @@
 #define CURRENT_FILTER_ON()		palSetPad(GPIOD, 2)
 #define CURRENT_FILTER_OFF()	palClearPad(GPIOD, 2)
 
+#define HALL_FILTER_GPIO		GPIOC
+#define HALL_FILTER_PIN			5
+#define HALL_FILTER_ON()		palSetPad(HALL_FILTER_GPIO, HALL_FILTER_PIN)
+#define HALL_FILTER_OFF()		palClearPad(HALL_FILTER_GPIO, HALL_FILTER_PIN)
+
 #define LED_GREEN_GPIO			GPIOE
 #define LED_GREEN_PIN			14
 #define LED_RED_GPIO			GPIOE
@@ -142,15 +147,17 @@
 #define HW_ADC_EXT2_GPIO		GPIOA
 #define HW_ADC_EXT2_PIN			6
 
-// UART Peripheral
+// UART Peripheral (USART3 TX/RX on PD8/9)
 #define HW_UART_DEV				SD3
 #define HW_UART_GPIO_AF			GPIO_AF_USART3
-#define HW_UART_TX_PORT			GPIOB
-#define HW_UART_TX_PIN			10
-#define HW_UART_RX_PORT			GPIOB
-#define HW_UART_RX_PIN			11
+#define HW_UART_TX_PORT			GPIOD
+#define HW_UART_TX_PIN			8
+#define HW_UART_RX_PORT			GPIOD
+#define HW_UART_RX_PIN			9
 
-// Permanent UART Peripheral
+// Permanent UART Peripheral (SPI3/UART4 group)
+// Defaulting to SPI3. Uncomment below to use as UART4.
+/*
 #define HW_UART_P_BAUD			115200
 #define HW_UART_P_DEV			SD4
 #define HW_UART_P_GPIO_AF		GPIO_AF_UART4
@@ -158,6 +165,20 @@
 #define HW_UART_P_TX_PIN		10
 #define HW_UART_P_RX_PORT		GPIOC
 #define HW_UART_P_RX_PIN		11
+*/
+
+// SPI pins (SPI3/UART4 on PC10-12 and PA15) // comment out to use UART4 above
+#define HW_SPI_DEV				SPID3
+#define HW_SPI_GPIO_AF			GPIO_AF_SPI3
+#define HW_SPI_PORT_NSS			GPIOA
+#define HW_SPI_PIN_NSS			15
+#define HW_SPI_PORT_SCK			GPIOC
+#define HW_SPI_PIN_SCK			10
+#define HW_SPI_PORT_MOSI		GPIOC
+#define HW_SPI_PIN_MOSI			12
+#define HW_SPI_PORT_MISO		GPIOC
+#define HW_SPI_PIN_MISO			11
+
 
 // ICU Peripheral for servo decoding
 #define HW_USE_SERVO_TIM4
@@ -169,13 +190,36 @@
 #define HW_ICU_GPIO				GPIOD
 #define HW_ICU_PIN				12
 
-// I2C Peripheral
+// I2C Peripheral (TX/SCL/MOSI and RX/SDA/NSS on PB10/11)
 #define HW_I2C_DEV				I2CD2
 #define HW_I2C_GPIO_AF			GPIO_AF_I2C2
 #define HW_I2C_SCL_PORT			GPIOB
 #define HW_I2C_SCL_PIN			10
 #define HW_I2C_SDA_PORT			GPIOB
 #define HW_I2C_SDA_PIN			11
+
+// CAN Peripheral (Main) - CAN H/L: originated from CANRX/TX on PD0/1
+#define HW_CAN_DEV              CAND1
+#define HW_CAN_RX_PORT          GPIOD
+#define HW_CAN_RX_PIN           0
+#define HW_CAN_TX_PORT          GPIOD
+#define HW_CAN_TX_PIN           1
+#define HW_CAN_GPIO_AF          GPIO_AF_CAN1
+
+// Second onboard CAN connection (CAN TX/RX on PB5/6)
+#define HW_HAS_DUAL_CAN
+#define HW_CAN2_DEV             CAND2
+#define HW_CAN2_RX_PORT         GPIOB
+#define HW_CAN2_RX_PIN          5
+#define HW_CAN2_TX_PORT         GPIOB
+#define HW_CAN2_TX_PIN          6
+#define HW_CAN2_GPIO_AF         GPIO_AF_CAN2
+
+// IMU I2C (PB8/PB9) for BMI270 (using BMI160 driver macros)
+#define BMI160_SDA_GPIO         GPIOB
+#define BMI160_SDA_PIN          9
+#define BMI160_SCL_GPIO         GPIOB
+#define BMI160_SCL_PIN          8
 
 // Hall/encoder pins
 #define HW_HALL_ENC_GPIO1		GPIOC
@@ -195,27 +239,6 @@
 #define HW_ENC_TIM_ISR_CH		TIM3_IRQn
 #define HW_ENC_TIM_ISR_VEC		TIM3_IRQHandler
 
-// SPI pins
-#define HW_SPI_DEV				SPID1
-#define HW_SPI_GPIO_AF			GPIO_AF_SPI1
-#define HW_SPI_PORT_NSS			GPIOB
-#define HW_SPI_PIN_NSS			11
-#define HW_SPI_PORT_SCK			GPIOA
-#define HW_SPI_PIN_SCK			5
-#define HW_SPI_PORT_MOSI		GPIOA
-#define HW_SPI_PIN_MOSI			7
-#define HW_SPI_PORT_MISO		GPIOA
-#define HW_SPI_PIN_MISO			6
-
-// SPI for DRV8301
-#define DRV8301_MOSI_GPIO		GPIOB
-#define DRV8301_MOSI_PIN		4
-#define DRV8301_MISO_GPIO		GPIOB
-#define DRV8301_MISO_PIN		3
-#define DRV8301_SCK_GPIO		GPIOC
-#define DRV8301_SCK_PIN			10
-#define DRV8301_CS_GPIO			GPIOC
-#define DRV8301_CS_PIN			9
 
 // Measurement macros
 #define ADC_V_L1				ADC_Value[ADC_IND_SENS1]
