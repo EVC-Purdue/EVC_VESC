@@ -45,7 +45,6 @@ void mcpwm_foc_set_brake_current(float current);
 void mcpwm_foc_set_handbrake(float current);
 void mcpwm_foc_set_openloop_current(float current, float rpm);
 void mcpwm_foc_set_openloop_phase(float current, float phase);
-void mcpwm_foc_set_single_bridge_duty(bool turn_on, int bridge, float dutyCycle);
 void mcpwm_foc_set_openloop_duty(float dutyCycle, float rpm);
 void mcpwm_foc_set_openloop_duty_phase(float dutyCycle, float phase);
 int mcpwm_foc_set_tachometer_value(int steps);

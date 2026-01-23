@@ -21,7 +21,7 @@
 #define HW_EVC_CORE_H_
 
 #ifdef HW_EVC_IS_REV1
-#define HW_NAME					"EVC_Controller REV1"
+#define HW_NAME					"EVC Controller REV1"
 #else
 #error "Must include hardware type"
 #endif
@@ -216,10 +216,10 @@
 #define HW_CAN2_GPIO_AF         GPIO_AF_CAN2
 
 // IMU I2C (PB8/PB9) for BMI270 (using BMI160 driver macros)
-#define BMI160_SDA_GPIO         GPIOB
-#define BMI160_SDA_PIN          9
-#define BMI160_SCL_GPIO         GPIOB
-#define BMI160_SCL_PIN          8
+#define BMI270_SDA_GPIO         GPIOB
+#define BMI270_SDA_PIN          9
+#define BMI270_SCL_GPIO         GPIOB
+#define BMI270_SCL_PIN          8
 
 // Hall/encoder pins
 #define HW_HALL_ENC_GPIO1		GPIOC

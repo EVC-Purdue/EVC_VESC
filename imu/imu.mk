@@ -4,6 +4,9 @@ IMUSRC = 	imu/mpu9150.c \
 			imu/imu.c \
 			imu/BMI160_driver/bmi160.c \
 			imu/bmi160_wrapper.c \
+			imu/BMI270_SensorAPI/bmi2.c \
+			imu/BMI270_SensorAPI/bmi270.c \
+			imu/bmi270_wrapper.c \
 			imu/lsm6ds3.c \
 			imu/Fusion/FusionAhrs.c \
 			imu/Fusion/FusionBias.c \
@@ -11,4 +14,5 @@ IMUSRC = 	imu/mpu9150.c \
 
 IMUINC = 	imu \
 			imu/BMI160_driver \
+			imu/BMI270_SensorAPI \
 			imu/Fusion

@@ -984,23 +984,6 @@ void mcpwm_foc_get_currents_adc(
 	*ph2 = motor->m_currents_adc[2];
 }
 
-void mcpwm_foc_set_single_bridge_duty(bool turn_on, int bridge, float dutyCycle) {
-	if(virtual_motor_is_connected() == false) {
-		if (turn_on) {
-			// do not allow to turn on PWM outputs if virtual motor is used
-			get_motor_now()->m_state = MC_STATE_OFF;
-			uint32_t duty[3] = {0, 0, 0};
-			duty[bridge] = (uint32_t)(dutyCycle*4095);
-			TIMER_UPDATE_DUTY_M1(duty[0], duty[1], duty[2]);
-			start_pwm_hw((motor_all_state_t*)get_motor_now());
-		}
-		else {
-			TIMER_UPDATE_DUTY_M1(0, 0, 0);
-			stop_pwm_hw((motor_all_state_t*)get_motor_now());
-		}
-	}
-}
-
 /**
  * Produce an openloop rotating voltage.
  *

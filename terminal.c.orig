@@ -826,36 +826,6 @@ __attribute__((section(".text2"))) void terminal_process_string(char *str) {
 		} else {
 			commands_printf("This command requires three arguments. [current time angle]\n");
 		}
-	} else if (strcmp(argv[0], "single_bridge_duty") == 0) {
-		if (argc == 4) {
-			int bridge = -1;
-			float duty = -1.0;
-			float time = -1.0;
-			sscanf(argv[1], "%d", &bridge);
-			sscanf(argv[2], "%f", &duty);
-			sscanf(argv[3], "%f", &time);
-
-			if (bridge>=0 && bridge<3 && duty>=0. && duty<=1.) {
-				int print_div = 0;
-				for (float t = 0.0;t < time;t += 0.002) {
-					timeout_reset();
-					mcpwm_foc_set_single_bridge_duty(true, bridge, duty);
-					chThdSleepMilliseconds(2);
-
-					print_div++;
-					if (print_div >= 200) {
-						print_div = 0;
-						commands_printf("T left: %.2f s", (double)(time - t));
-					}
-				}
-				commands_printf("Done\n");
-				mcpwm_foc_set_single_bridge_duty(false, bridge, duty);
-			} else {
-				commands_printf("Invalid argument(s). %d %f %f\n", bridge, (double)duty, (double)time);
-			}
-		} else {
-			commands_printf("This command requires three arguments.\n");
-		}
 	} else if (strcmp(argv[0], "foc_detect_apply_all") == 0) {
 		if (argc == 2) {
 			float max_power_loss = -1.0;
@@ -1274,9 +1244,6 @@ __attribute__((section(".text2"))) void terminal_process_string(char *str) {
 		commands_printf("rotor_lock_openloop [current_A] [time_S] [angle_DEG]");
 		commands_printf("  Lock the motor with a current for a given time. Time 0 means forever, or");
 		commands_printf("  or until the heartbeat packets stop.");
-
-		commands_printf("single_bridge_duty [bridge no] [duty] [time_S]");
-		commands_printf("  Set duty cycle for specific bridge number (0-2) for a given time.");
 
 		commands_printf("foc_detect_apply_all [max_power_loss_W]");
 		commands_printf("  Detect and apply all motor settings, based on maximum resistive motor power losses.");

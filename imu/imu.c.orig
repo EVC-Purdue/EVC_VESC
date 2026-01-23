@@ -26,7 +26,6 @@
 #include "commands.h"
 #include "icm20948.h"
 #include "bmi160_wrapper.h"
-#include "bmi270_wrapper.h"
 #include "lsm6ds3.h"
 #include "utils_math.h"
 #include "Fusion.h"
@@ -34,9 +33,6 @@
 
 #include <math.h>
 #include <string.h>
-
-#define READ_WRITE_LEN  UINT8_C(255)  // Maximum transfer size for BMI323
-//#define READ_WRITE_LEN     UINT8_C(32)
 
 // Private variables
 static ATTITUDE_INFO m_att;
@@ -47,7 +43,6 @@ static i2c_bb_state m_i2c_bb;
 static spi_bb_state m_spi_bb;
 static ICM20948_STATE m_icm20948_state;
 static BMI_STATE m_bmi_state;
-static BMI270_STATE m_bmi270_state;
 static imu_config m_settings;
 static systime_t init_time;
 static bool imu_ready;
@@ -61,13 +56,6 @@ static int8_t user_i2c_write(uint8_t dev_addr, uint8_t reg_addr, uint8_t *data, 
 static int8_t user_spi_read(uint8_t dev_id, uint8_t reg_addr, uint8_t *data, uint16_t len);
 static int8_t user_spi_write(uint8_t dev_id, uint8_t reg_addr, uint8_t *data, uint16_t len);
 static void terminal_imu_type_internal(int argc, const char **argv);
-
-static BMI2_INTF_RETURN_TYPE bmi2_i2c_read(uint8_t reg_addr, uint8_t *reg_data, uint32_t len, void *intf_ptr);
-static BMI2_INTF_RETURN_TYPE bmi2_i2c_write(uint8_t reg_addr, const uint8_t *reg_data, uint32_t len, void *intf_ptr);
-static BMI2_INTF_RETURN_TYPE bmi2_spi_read(uint8_t reg_addr, uint8_t *reg_data, uint32_t len, void *intf_ptr);
-static BMI2_INTF_RETURN_TYPE bmi2_spi_write(uint8_t reg_addr, const uint8_t *reg_data, uint32_t len, void *intf_ptr);
-
-uint8_t bmi_dev_addr;
 
 // Function pointers
 static void (*m_read_callback)(float *acc, float *gyro, float *mag, float dt) = NULL;
@@ -113,11 +101,9 @@ void imu_init(imu_config *set) {
 	mpu9150_set_rate_hz(MIN(set->sample_rate_hz, 1000));
 	m_icm20948_state.rate_hz = MIN(set->sample_rate_hz, 1000);
 	m_bmi_state.rate_hz = set->sample_rate_hz;
-	m_bmi270_state.rate_hz = set->sample_rate_hz;
 	lsm6ds3_set_rate_hz(set->sample_rate_hz);
 
 	m_bmi_state.filter = set->filter;
-	m_bmi270_state.filter = set->filter;
 	lsm6ds3_set_filter(set->filter);
 
 	if (set->type == IMU_TYPE_INTERNAL) {
@@ -137,12 +123,6 @@ void imu_init(imu_config *set) {
 		imu_init_bmi160_i2c(BMI160_SDA_GPIO, BMI160_SDA_PIN,
 				BMI160_SCL_GPIO, BMI160_SCL_PIN);
 		m_imu_type_internal = "BMI160";
-#endif
-
-#ifdef BMI270_SDA_GPIO
-		imu_init_bmi270_i2c(BMI270_SDA_GPIO, BMI270_SDA_PIN,
-				BMI270_SCL_GPIO, BMI270_SCL_PIN);
-		m_imu_type_internal = "BMI270";
 #endif
 
 #ifdef LSM6DS3_SDA_GPIO
@@ -170,16 +150,6 @@ void imu_init(imu_config *set) {
 				BMI160_SPI_PORT_MISO, BMI160_SPI_PIN_MISO);
 		m_imu_type_internal = "BMI160_SPI";
 #endif
-
-#ifdef BMI270_SPI_PORT_NSS
-		imu_init_bmi270_spi(
-				BMI270_SPI_PORT_NSS, BMI270_SPI_PIN_NSS,
-				BMI270_SPI_PORT_SCK, BMI270_SPI_PIN_SCK,
-				BMI270_SPI_PORT_MOSI, BMI270_SPI_PIN_MOSI,
-				BMI270_SPI_PORT_MISO, BMI270_SPI_PIN_MISO);
-		m_imu_type_internal = "BMI270_SPI";
-#endif
-
 	} else if (set->type == IMU_TYPE_EXTERNAL_MPU9X50) {
 		imu_init_mpu9x50(HW_I2C_SDA_PORT, HW_I2C_SDA_PIN,
 				HW_I2C_SCL_PORT, HW_I2C_SCL_PIN);
@@ -243,47 +213,6 @@ void imu_init_icm20948(stm32_gpio_t *sda_gpio, int sda_pin,
 	icm20948_set_read_callback(&m_icm20948_state, imu_read_callback);
 }
 
-void imu_init_bmi270_i2c(stm32_gpio_t *sda_gpio, int sda_pin,
-		stm32_gpio_t *scl_gpio, int scl_pin) {
-	imu_stop();
-
-	m_i2c_bb.sda_gpio = sda_gpio;
-	m_i2c_bb.sda_pin = sda_pin;
-	m_i2c_bb.scl_gpio = scl_gpio;
-	m_i2c_bb.scl_pin = scl_pin;
-	m_i2c_bb.rate = I2C_BB_RATE_400K;
-	i2c_bb_init(&m_i2c_bb);
-
-	// Assign device address to interface pointer
-	bmi_dev_addr = BMI2_I2C_PRIM_ADDR;  // Use BMI3_ADDR_I2C_SEC (0x69) if the AD0 pin is connected to VDDIO
-    m_bmi270_state.sensor.intf_ptr = &bmi_dev_addr;
-
-    // Initialize the interface structure
-    m_bmi270_state.sensor.intf = BMI2_I2C_INTF;
-	m_bmi270_state.sensor.read = (bmi2_read_fptr_t)bmi2_i2c_read;
-	m_bmi270_state.sensor.write = (bmi2_write_fptr_t)bmi2_i2c_write;
-	//dev->delay_us = user_delay;
-	
-	// JEO JEO: REMEMBER: SDO to Ground on PCB  ???????
-
-            /* SDO to Ground */
-    //        coines_set_pin_config(COINES_SHUTTLE_PIN_22, COINES_PIN_DIRECTION_OUT, COINES_PIN_VALUE_LOW);
-
-            /* Make CSB pin HIGH */
-    //        coines_set_pin_config(COINES_SHUTTLE_PIN_21, COINES_PIN_DIRECTION_OUT, COINES_PIN_VALUE_HIGH);
-    //        coines_delay_msec(100);
-
-            /* SDO pin is made low */
-    //        coines_set_pin_config(COINES_SHUTTLE_PIN_SDO, COINES_PIN_DIRECTION_OUT, COINES_PIN_VALUE_LOW);
-
-
-	/* Configure max read/write length (in bytes) ( Supported length depends on target machine) */
-    m_bmi270_state.sensor.read_write_len = READ_WRITE_LEN;
-    
-	bmi270_wrapper_init(&m_bmi270_state, m_thd_work_area, sizeof(m_thd_work_area));
-	bmi270_wrapper_set_read_callback(&m_bmi270_state, imu_read_callback);
-}
-
 void imu_init_bmi160_i2c(stm32_gpio_t *sda_gpio, int sda_pin,
 		stm32_gpio_t *scl_gpio, int scl_pin) {
 	imu_stop();
@@ -302,38 +231,6 @@ void imu_init_bmi160_i2c(stm32_gpio_t *sda_gpio, int sda_pin,
 
 	bmi160_wrapper_init(&m_bmi_state, m_thd_work_area, sizeof(m_thd_work_area));
 	bmi160_wrapper_set_read_callback(&m_bmi_state, imu_read_callback);
-}
-
-void imu_init_bmi270_spi(stm32_gpio_t *nss_gpio, int nss_pin,
-		stm32_gpio_t *sck_gpio, int sck_pin, stm32_gpio_t *mosi_gpio, int mosi_pin,
-		stm32_gpio_t *miso_gpio, int miso_pin) {
-	imu_stop();
-
-	m_spi_bb.nss_gpio = nss_gpio;
-	m_spi_bb.nss_pin = nss_pin;
-	m_spi_bb.sck_gpio = sck_gpio;
-	m_spi_bb.sck_pin = sck_pin;
-	m_spi_bb.mosi_gpio = mosi_gpio;
-	m_spi_bb.mosi_pin = mosi_pin;
-	m_spi_bb.miso_gpio = miso_gpio;
-	m_spi_bb.miso_pin = miso_pin;
-
-	spi_bb_init(&m_spi_bb);
-
-	// Assign device address to interface pointer
-	m_bmi270_state.sensor.intf_ptr = &bmi_dev_addr;  // Unused for SPI but required by the API
-
-    // Initialize the interface structure
-    m_bmi270_state.sensor.intf = BMI2_SPI_INTF;
-    m_bmi270_state.sensor.read = (bmi2_read_fptr_t)bmi2_spi_read;
-    m_bmi270_state.sensor.write = (bmi2_write_fptr_t)bmi2_spi_write;
-    //dev->delay_us = user_delay;
-
-	/* Configure max read/write length (in bytes) ( Supported length depends on target machine) */
-    m_bmi270_state.sensor.read_write_len = READ_WRITE_LEN;
-
-	bmi270_wrapper_init(&m_bmi270_state, m_thd_work_area, sizeof(m_thd_work_area));
-	bmi270_wrapper_set_read_callback(&m_bmi270_state, imu_read_callback);
 }
 
 void imu_init_bmi160_spi(stm32_gpio_t *nss_gpio, int nss_pin,
@@ -381,7 +278,6 @@ void imu_stop(void) {
 	mpu9150_stop();
 	icm20948_stop(&m_icm20948_state);
 	bmi160_wrapper_stop(&m_bmi_state);
-	bmi270_wrapper_stop(&m_bmi270_state);
 	lsm6ds3_stop();
 }
 
@@ -812,72 +708,4 @@ static int8_t user_spi_write(uint8_t dev_id, uint8_t reg_addr, uint8_t *data, ui
 static void terminal_imu_type_internal(int argc, const char **argv) {
 	(void)argc;(void)argv;
 	commands_printf(m_imu_type_internal);
-}
-
-
-/******************************************************************************/
-/*!               BMI270 Static functions                                     */
-
-static BMI2_INTF_RETURN_TYPE bmi2_i2c_read(uint8_t reg_addr, uint8_t *reg_data, uint32_t len, void *intf_ptr)
-{
-    uint8_t dev_addr = *(uint8_t*)intf_ptr;
-
-	m_i2c_bb.has_error = 0;
-
-	uint8_t txbuf[1];
-	txbuf[0] = reg_addr;
-	return i2c_bb_tx_rx(&m_i2c_bb, dev_addr, txbuf, 1, reg_data, len) ? BMI2_OK : BMI2_E_COM_FAIL;
-}
-
-static BMI2_INTF_RETURN_TYPE bmi2_i2c_write(uint8_t reg_addr, const uint8_t *reg_data, uint32_t len, void *intf_ptr)
-{
-    uint8_t dev_addr = *(uint8_t*)intf_ptr;
-
-	m_i2c_bb.has_error = 0;
-
-	uint8_t txbuf[len + 1];
-	txbuf[0] = reg_addr;
-	memcpy(txbuf + 1, reg_data, len);
-	return i2c_bb_tx_rx(&m_i2c_bb, dev_addr, txbuf, len + 1, 0, 0) ? BMI2_OK : BMI2_E_COM_FAIL;
-}
-
-static BMI2_INTF_RETURN_TYPE bmi2_spi_read(uint8_t reg_addr, uint8_t *reg_data, uint32_t len, void *intf_ptr)
-{
-    (void)intf_ptr;
-	
-	reg_addr = (reg_addr | BMI2_SPI_RD_MASK);
-
-	chMtxLock(&m_spi_bb.mutex);
-	spi_bb_begin(&m_spi_bb);
-	spi_bb_exchange_8(&m_spi_bb, reg_addr);
-	spi_bb_delay();
-
-	for (uint32_t i = 0; i < len; i++) {
-		reg_data[i] = spi_bb_exchange_8(&m_spi_bb, 0);
-	}
-
-	spi_bb_end(&m_spi_bb);
-	chMtxUnlock(&m_spi_bb.mutex);
-	return BMI2_OK;
-}
-
-static BMI2_INTF_RETURN_TYPE bmi2_spi_write(uint8_t reg_addr, const uint8_t *reg_data, uint32_t len, void *intf_ptr)
-{
-    (void)intf_ptr;
-
-	chMtxLock(&m_spi_bb.mutex);
-	spi_bb_begin(&m_spi_bb);
-	reg_addr = (reg_addr & BMI2_SPI_WR_MASK);
-	spi_bb_exchange_8(&m_spi_bb, reg_addr);
-	spi_bb_delay();
-
-	for (uint32_t i = 0; i < len; i++) {
-		spi_bb_exchange_8(&m_spi_bb, *reg_data);
-		reg_data++;
-	}
-
-	spi_bb_end(&m_spi_bb);
-	chMtxUnlock(&m_spi_bb.mutex);
-
-	return BMI2_OK;
 }
