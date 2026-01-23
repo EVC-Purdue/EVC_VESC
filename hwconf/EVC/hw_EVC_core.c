@@ -155,6 +155,9 @@ static THD_FUNCTION(precharge_thread, arg) {
 	while (precharge_state == BOOTED || precharge_state == PRECHARGING) {
 		switch (precharge_state) {
 		case BOOTED:
+			while(IS_DRV_FAULT()) { // do not precharge if ESTOP is pressed
+				chThdSleepMilliseconds(100);
+			}
 			precharge_state = PRECHARGING;
 			break;
 
