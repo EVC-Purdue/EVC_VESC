@@ -29,6 +29,14 @@
 #include "terminal.h"
 #include "commands.h"
 #include "mc_interface.h"
+#include "mcpwm.h"
+#include "mcpwm_foc.h"
+#include "app.h"
+#include "mempools.h"
+#include "timeout.h"
+#include "stdio.h"
+#include "utils.h"
+#include <math.h>
 
 // Variables
 static volatile bool i2c_running = false;
@@ -51,6 +59,9 @@ static volatile precharge_state_t precharge_state = BOOTED;
 
 static THD_WORKING_AREA(precharge_thread_wa, 128);
 static THD_FUNCTION(precharge_thread, arg);
+
+static void terminal_cmd_doublepulse(int argc, const char** argv);
+static void terminal_cmd_clear_curr_fault(int argc, const char** argv);
 
 void hw_init_gpio(void) {
 	// GPIO clock enable
@@ -85,7 +96,8 @@ void hw_init_gpio(void) {
 	CURRENT_FILTER_OFF();
 
 	// Clear curr fault detect
-	palSetPadMode(GPIOD, 7, PAL_MODE_INPUT);
+	palSetPadMode(CLEAR_CURR_FAULT_GPIO, CLEAR_CURR_FAULT_PIN, PAL_MODE_OUTPUT_OPENDRAIN);
+	palSetPad(CLEAR_CURR_FAULT_GPIO, CLEAR_CURR_FAULT_PIN);
 
 	// Hall filter
 	palSetPadMode(HALL_FILTER_GPIO, HALL_FILTER_PIN,
@@ -144,6 +156,19 @@ void hw_init_gpio(void) {
 	palSetPadMode(GPIOC, 2, PAL_MODE_INPUT_ANALOG); // p3I
 	palSetPadMode(GPIOC, 3, PAL_MODE_INPUT_ANALOG); // VBAT
 	palSetPadMode(GPIOC, 4, PAL_MODE_INPUT_ANALOG); // MOT temp
+
+	//register terminal callbacks
+	terminal_register_command_callback(
+		"double_pulse",
+		"Start a double pulse test",
+		0,
+		terminal_cmd_doublepulse);
+	
+	terminal_register_command_callback(
+		"clear_curr_fault",
+		"Clear current sensor fault detection",
+		0,
+		terminal_cmd_clear_curr_fault);
 
 }
 
@@ -355,4 +380,177 @@ void hw_try_restore_i2c(void) {
 
 		i2cReleaseBus(&HW_I2C_DEV);
 	}
+}
+
+float hw_evc_get_temp(void) {
+	// Use the average of the three MOSFET temps
+    uint16_t ntc_adc1 = ADC_Value[ADC_IND_TEMP_MOS];
+    uint16_t ntc_adc2 = ADC_Value[ADC_IND_TEMP_MOS_2];
+    uint16_t ntc_adc3 = ADC_Value[ADC_IND_TEMP_MOS_3];
+	uint16_t max_adc = MAX(MAX(ntc_adc1, ntc_adc2), ntc_adc3);
+
+	return ((1.0 / ((logf(NTC_RES(max_adc) / 10000.0) / 3380.0) + (1.0 / 298.15)) - 273.15));
+}
+
+
+
+static void terminal_cmd_doublepulse(int argc, const char** argv)
+{
+	(void)argc;
+	(void)argv;
+
+	int preface, pulse1, breaktime, pulse2;
+	int utick;
+	int deadtime = -1;
+
+	TIM_TimeBaseInitTypeDef	 TIM_TimeBaseStructure;
+	TIM_OCInitTypeDef  TIM_OCInitStructure;
+	TIM_BDTRInitTypeDef TIM_BDTRInitStructure;
+
+	if (argc < 5) {
+		commands_printf("Usage: double_pulse <preface> <pulse1> <break> <pulse2> [deadtime]");
+		commands_printf("	preface: idle time in us");
+		commands_printf("	 pulse1: high time of pulse 1 in us");
+		commands_printf("	  break: break between pulses in us");
+		commands_printf("	 pulse2: high time of pulse 2 in us");
+		commands_printf("  deadtime: overwrite deadtime, in ns");
+		return;
+	}
+	sscanf(argv[1], "%d", &preface);
+	sscanf(argv[2], "%d", &pulse1);
+	sscanf(argv[3], "%d", &breaktime);
+	sscanf(argv[4], "%d", &pulse2);
+	if (argc == 6) {
+		sscanf(argv[5], "%d", &deadtime);
+	}
+	timeout_configure_IWDT_slowest();
+
+	utick = (int)(SYSTEM_CORE_CLOCK / 1000000);
+	mcpwm_deinit();
+	mcpwm_foc_deinit();
+
+	TIM_Cmd(TIM1, DISABLE);
+	TIM_Cmd(TIM4, DISABLE);
+	//TIM4 als Trigger Timer
+	RCC_APB1PeriphClockCmd(RCC_APB1Periph_TIM4, ENABLE);
+
+	TIM_TimeBaseStructure.TIM_Period = (SYSTEM_CORE_CLOCK / 20000);
+	TIM_TimeBaseStructure.TIM_Prescaler = 0;
+	TIM_TimeBaseStructure.TIM_ClockDivision = 0;
+	TIM_TimeBaseStructure.TIM_CounterMode = TIM_CounterMode_Up;
+	TIM_TimeBaseInit(TIM4, &TIM_TimeBaseStructure);
+	TIM_SelectMasterSlaveMode(TIM4, TIM_MasterSlaveMode_Enable);
+	TIM_SelectOutputTrigger(TIM4, TIM_TRGOSource_Enable);
+	TIM4->CNT = 0;
+
+	// TIM1
+	// TIM1 clock enable
+	RCC_APB2PeriphClockCmd(RCC_APB2Periph_TIM1, ENABLE);
+
+	// Time Base configuration
+	TIM_TimeBaseStructure.TIM_Prescaler = 0;
+	TIM_TimeBaseStructure.TIM_CounterMode = TIM_CounterMode_Up;
+	TIM_TimeBaseStructure.TIM_Period = (preface + pulse1) * utick;
+	TIM_TimeBaseStructure.TIM_ClockDivision = 0;
+	TIM_TimeBaseStructure.TIM_RepetitionCounter = 0;
+	TIM_TimeBaseInit(TIM1, &TIM_TimeBaseStructure);
+
+	// Channel 1, 2 and 3 Configuration in PWM mode
+	TIM_OCInitStructure.TIM_OCMode = TIM_OCMode_PWM2;
+	TIM_OCInitStructure.TIM_OutputState = TIM_OutputState_Enable;
+	TIM_OCInitStructure.TIM_OutputNState = TIM_OutputNState_Enable;
+	TIM_OCInitStructure.TIM_Pulse = preface * utick;
+	TIM_OCInitStructure.TIM_OCPolarity = TIM_OCPolarity_High;
+	TIM_OCInitStructure.TIM_OCNPolarity = TIM_OCNPolarity_High;
+	TIM_OCInitStructure.TIM_OCIdleState = TIM_OCIdleState_Set;
+	TIM_OCInitStructure.TIM_OCNIdleState = TIM_OCNIdleState_Set;
+
+	TIM_OC1Init(TIM1, &TIM_OCInitStructure);
+	TIM_OC1PreloadConfig(TIM1, TIM_OCPreload_Enable);
+	TIM_OC2Init(TIM1, &TIM_OCInitStructure);
+	TIM_OC2PreloadConfig(TIM1, TIM_OCPreload_Enable);
+	TIM_OC3Init(TIM1, &TIM_OCInitStructure);
+	TIM_OC3PreloadConfig(TIM1, TIM_OCPreload_Enable);
+
+	TIM_SelectOCxM(TIM1, TIM_Channel_1, TIM_OCMode_PWM2);
+	TIM_CCxCmd(TIM1, TIM_Channel_1, TIM_CCx_Enable);
+	TIM_CCxNCmd(TIM1, TIM_Channel_1, TIM_CCxN_Enable);
+
+	TIM_SelectOCxM(TIM1, TIM_Channel_2, TIM_OCMode_Inactive);
+	TIM_CCxCmd(TIM1, TIM_Channel_2, TIM_CCx_Enable);
+	TIM_CCxNCmd(TIM1, TIM_Channel_2, TIM_CCxN_Enable);
+
+	TIM_SelectOCxM(TIM1, TIM_Channel_3, TIM_OCMode_Inactive);
+	TIM_CCxCmd(TIM1, TIM_Channel_3, TIM_CCx_Enable);
+	TIM_CCxNCmd(TIM1, TIM_Channel_3, TIM_CCxN_Enable);
+	TIM_GenerateEvent(TIM1, TIM_EventSource_COM);
+
+
+	// Automatic Output enable, Break, dead time and lock configuration
+	TIM_BDTRInitStructure.TIM_OSSRState = TIM_OSSRState_Enable;
+	TIM_BDTRInitStructure.TIM_OSSIState = TIM_OSSIState_Enable;
+	TIM_BDTRInitStructure.TIM_LOCKLevel = TIM_LOCKLevel_OFF;
+	if (deadtime < 0) {
+		TIM_BDTRInitStructure.TIM_DeadTime = conf_general_calculate_deadtime(HW_DEAD_TIME_NSEC, SYSTEM_CORE_CLOCK);
+	} else {
+		TIM_BDTRInitStructure.TIM_DeadTime = conf_general_calculate_deadtime(deadtime, SYSTEM_CORE_CLOCK);
+	}
+	TIM_BDTRInitStructure.TIM_Break = TIM_Break_Disable;
+	TIM_BDTRInitStructure.TIM_BreakPolarity = TIM_BreakPolarity_High;
+	TIM_BDTRInitStructure.TIM_AutomaticOutput = TIM_AutomaticOutput_Disable;
+	TIM_BDTRConfig(TIM1, &TIM_BDTRInitStructure);
+
+	TIM_CCPreloadControl(TIM1, ENABLE);
+	TIM_ARRPreloadConfig(TIM1, ENABLE);
+
+	TIM1->CNT = 0;
+	TIM1->EGR = TIM_EGR_UG;
+
+	TIM_SelectSlaveMode(TIM1, TIM_SlaveMode_Trigger);
+	TIM_SelectInputTrigger(TIM1, TIM_TS_ITR3);
+	TIM_SelectOnePulseMode(TIM1, TIM_OPMode_Single);
+	TIM_CtrlPWMOutputs(TIM1, ENABLE);
+
+	TIM_Cmd(TIM1, ENABLE);
+	//Timer 4 triggert Timer 1
+	TIM_Cmd(TIM4, ENABLE);
+	TIM_Cmd(TIM4, DISABLE);
+	TIM1->ARR = (breaktime + pulse2) * utick;
+	TIM1->CCR1 = breaktime * utick;
+	while (TIM1->CNT != 0);
+	TIM_Cmd(TIM4, ENABLE);
+
+	chThdSleepMilliseconds(1);
+	TIM_CtrlPWMOutputs(TIM1, DISABLE);
+	mc_configuration* mcconf = mempools_alloc_mcconf();
+	*mcconf = *mc_interface_get_configuration();
+
+	switch (mcconf->motor_type) {
+	case MOTOR_TYPE_BLDC:
+	case MOTOR_TYPE_DC:
+		mcpwm_init(mcconf);
+		break;
+
+	case MOTOR_TYPE_FOC:
+		mcpwm_foc_init(mcconf, mcconf);
+		break;
+
+	default:
+		break;
+	}
+	commands_printf("Done");
+	mempools_free_mcconf(mcconf);
+	return;
+}
+
+static void terminal_cmd_clear_curr_fault(int argc, const char** argv)
+{
+	(void)argc;
+	(void)argv;
+
+	palClearPad(CLEAR_CURR_FAULT_GPIO, CLEAR_CURR_FAULT_PIN);
+	chThdSleepMilliseconds(100);
+	palSetPad(CLEAR_CURR_FAULT_GPIO, CLEAR_CURR_FAULT_PIN);
+
+	commands_printf("Current sensor fault detection cleared");
 }

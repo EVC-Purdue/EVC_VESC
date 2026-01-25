@@ -54,6 +54,9 @@
 #define CURRENT_FILTER_ON()		palSetPad(GPIOD, 2)
 #define CURRENT_FILTER_OFF()	palClearPad(GPIOD, 2)
 
+#define CLEAR_CURR_FAULT_GPIO    GPIOD
+#define CLEAR_CURR_FAULT_PIN     7
+
 #define HALL_FILTER_GPIO		GPIOC
 #define HALL_FILTER_PIN			5
 #define HALL_FILTER_ON()		palSetPad(HALL_FILTER_GPIO, HALL_FILTER_PIN)
@@ -134,7 +137,10 @@
 
 // NTC Termistors
 #define NTC_RES(adc_val)		((4095.0 * 10000.0) / adc_val - 10000.0)
-#define NTC_TEMP(adc_ind)		(1.0 / ((logf(NTC_RES(ADC_Value[adc_ind]) / 10000.0) / 3380.0) + (1.0 / 298.15)) - 273.15)
+#define NTC_TEMP_MOS1()		(1.0 / ((logf(NTC_RES(ADC_Value[ADC_IND_TEMP_MOS]) / 10000.0) / 3380.0) + (1.0 / 298.15)) - 273.15)
+#define NTC_TEMP_MOS2()		(1.0 / ((logf(NTC_RES(ADC_Value[ADC_IND_TEMP_MOS_2]) / 10000.0) / 3380.0) + (1.0 / 298.15)) - 273.15)
+#define NTC_TEMP_MOS3()		(1.0 / ((logf(NTC_RES(ADC_Value[ADC_IND_TEMP_MOS_3]) / 10000.0) / 3380.0) + (1.0 / 298.15)) - 273.15)
+#define NTC_TEMP(adc_ind)		hw_evc_get_temp()
 
 #define NTC_RES_MOTOR(adc_val)	(10000.0 / ((4095.0 / (float)adc_val) - 1.0)) // Motor temp sensor on low side
 #define NTC_TEMP_MOTOR(beta)	(1.0 / ((logf(NTC_RES_MOTOR(ADC_Value[ADC_IND_TEMP_MOTOR]) / 10000.0) / beta) + (1.0 / 298.15)) - 273.15)
@@ -252,6 +258,8 @@
 #define READ_HALL2()			palReadPad(HW_HALL_ENC_GPIO2, HW_HALL_ENC_PIN2)
 #define READ_HALL3()			palReadPad(HW_HALL_ENC_GPIO3, HW_HALL_ENC_PIN3)
 
+float hw_evc_get_temp(void);
+
 // Default setting overrides
 #ifndef MCCONF_DEFAULT_MOTOR_TYPE
 #define MCCONF_DEFAULT_MOTOR_TYPE		MOTOR_TYPE_FOC
@@ -263,14 +271,14 @@
 #define MCCONF_L_MAX_ABS_CURRENT		150.0	// The maximum absolute current above which a fault is generated
 #endif
 #ifndef MCCONF_FOC_SAMPLE_V0_V7
-#define MCCONF_FOC_SAMPLE_V0_V7			false	// Run control loop in both v0 and v7 (requires phase shunts)
+#define MCCONF_FOC_SAMPLE_V0_V7			true	// Run control loop in both v0 and v7 (requires phase shunts)
 #endif
 
 // Setting limits
-#define HW_LIM_CURRENT			-120.0, 120.0
-#define HW_LIM_CURRENT_IN		-120.0, 120.0
-#define HW_LIM_CURRENT_ABS		0.0, 160.0
-#define HW_LIM_VIN				6.0, 57.0
+#define HW_LIM_CURRENT			-120.0, 600.0
+#define HW_LIM_CURRENT_IN		-120.0, 400.0
+#define HW_LIM_CURRENT_ABS		0.0, 750.0
+#define HW_LIM_VIN				6.0, 150.0
 #define HW_LIM_VIN_MIN          6.0
 #define HW_LIM_ERPM				-200e3, 200e3
 #define HW_LIM_DUTY_MIN			0.0, 0.1
