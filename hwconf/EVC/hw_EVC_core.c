@@ -172,6 +172,7 @@ void hw_init_gpio(void) {
 		"Clear current sensor fault detection",
 		0,
 		terminal_cmd_clear_curr_fault);
+	terminal_cmd_clear_curr_fault(0, NULL);
 
 	terminal_register_command_callback(
 		"precharge_state",
