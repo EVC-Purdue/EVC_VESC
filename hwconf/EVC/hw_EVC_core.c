@@ -62,6 +62,7 @@ static THD_FUNCTION(precharge_thread, arg);
 
 static void terminal_cmd_doublepulse(int argc, const char** argv);
 static void terminal_cmd_clear_curr_fault(int argc, const char** argv);
+static void terminal_cmd_precharge_state(int argc, const char** argv);
 
 void hw_init_gpio(void) {
 	// GPIO clock enable
@@ -88,6 +89,8 @@ void hw_init_gpio(void) {
 			PAL_MODE_OUTPUT_PUSHPULL);
 	palSetPadMode(GPIOE, 6,
 			PAL_MODE_OUTPUT_PUSHPULL);
+	DISABLE_PRECHARGE();
+	DISABLE_MAIN_COIL();
 	
 	// Current filter
 	palSetPadMode(GPIOD, 2,
@@ -169,6 +172,12 @@ void hw_init_gpio(void) {
 		"Clear current sensor fault detection",
 		0,
 		terminal_cmd_clear_curr_fault);
+
+	terminal_register_command_callback(
+		"precharge_state",
+		"Get precharge state",
+		0,
+		terminal_cmd_precharge_state);
 
 }
 
@@ -553,4 +562,29 @@ static void terminal_cmd_clear_curr_fault(int argc, const char** argv)
 	palSetPad(CLEAR_CURR_FAULT_GPIO, CLEAR_CURR_FAULT_PIN);
 
 	commands_printf("Current sensor fault detection cleared");
+}
+
+// Function to debug the precharge sequence
+static void terminal_cmd_precharge_state(int argc, const char** argv)
+{
+	(void)argc;
+	(void)argv;
+
+	switch (precharge_state) {
+	case BOOTED:
+		commands_printf("Precharge state: BOOTED");
+		break;
+	case PRECHARGING:
+		commands_printf("Precharge state: PRECHARGING");
+		break;
+	case PRECHARGED:
+		commands_printf("Precharge state: PRECHARGED");
+		break;
+	case PRECHARGE_FAILED:
+		commands_printf("Precharge state: PRECHARGE_FAILED");
+		break;
+	default:
+		commands_printf("Precharge state: UNKNOWN");
+		break;
+	}
 }
