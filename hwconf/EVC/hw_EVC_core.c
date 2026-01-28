@@ -52,7 +52,8 @@ typedef enum {
 	BOOTED = 0,
 	PRECHARGING,
 	PRECHARGED,
-	PRECHARGE_FAILED
+	PRECHARGE_FAILED,
+	PRECHARGE_FORCED
 } precharge_state_t;
 
 static volatile precharge_state_t precharge_state = BOOTED;
@@ -62,7 +63,9 @@ static THD_FUNCTION(precharge_thread, arg);
 
 static void terminal_cmd_doublepulse(int argc, const char** argv);
 static void terminal_cmd_clear_curr_fault(int argc, const char** argv);
+static void clear_current_fault_hw(void);
 static void terminal_cmd_precharge_state(int argc, const char** argv);
+static void terminal_cmd_precharge_bypass(int argc, const char** argv);
 
 void hw_init_gpio(void) {
 	// GPIO clock enable
@@ -172,13 +175,19 @@ void hw_init_gpio(void) {
 		"Clear current sensor fault detection",
 		0,
 		terminal_cmd_clear_curr_fault);
-	terminal_cmd_clear_curr_fault(0, NULL);
+	clear_current_fault_hw();
 
 	terminal_register_command_callback(
 		"precharge_state",
 		"Get precharge state",
 		0,
 		terminal_cmd_precharge_state);
+
+	terminal_register_command_callback(
+		"precharge_bypass",
+		"Bypass precharge and enable main contactor",
+		0,
+		terminal_cmd_precharge_bypass);
 
 }
 
@@ -553,16 +562,39 @@ static void terminal_cmd_doublepulse(int argc, const char** argv)
 	return;
 }
 
+static void clear_current_fault_hw(void) {
+	palClearPad(CLEAR_CURR_FAULT_GPIO, CLEAR_CURR_FAULT_PIN);
+	chThdSleepMilliseconds(100);
+	palSetPad(CLEAR_CURR_FAULT_GPIO, CLEAR_CURR_FAULT_PIN);
+}
+
 static void terminal_cmd_clear_curr_fault(int argc, const char** argv)
 {
 	(void)argc;
 	(void)argv;
 
-	palClearPad(CLEAR_CURR_FAULT_GPIO, CLEAR_CURR_FAULT_PIN);
-	chThdSleepMilliseconds(100);
-	palSetPad(CLEAR_CURR_FAULT_GPIO, CLEAR_CURR_FAULT_PIN);
+	clear_current_fault_hw();
 
 	commands_printf("Current sensor fault detection cleared");
+}
+
+static void terminal_cmd_precharge_bypass(int argc, const char** argv)
+{
+	(void)argc;
+	(void)argv;
+
+	// confirm message. start after 5 seconds
+	commands_printf("Bypassing precharge in 10 seconds. Disconnect power to abort.");
+	chThdSleepMilliseconds(10000);
+
+	ENABLE_MAIN_COIL();
+	DISABLE_PRECHARGE();
+	mc_interface_unlock();
+	ENABLE_GATE();
+
+	precharge_state = PRECHARGE_FORCED;
+
+	commands_printf("Precharge bypassed, main contactor enabled");
 }
 
 // Function to debug the precharge sequence
@@ -583,6 +615,9 @@ static void terminal_cmd_precharge_state(int argc, const char** argv)
 		break;
 	case PRECHARGE_FAILED:
 		commands_printf("Precharge state: PRECHARGE_FAILED");
+		break;
+	case PRECHARGE_FORCED:
+		commands_printf("Precharge state: PRECHARGE_FORCED");
 		break;
 	default:
 		commands_printf("Precharge state: UNKNOWN");
