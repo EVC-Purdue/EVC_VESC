@@ -129,7 +129,7 @@
 #define CURRENT_AMP_GAIN		0.7186 // output divider
 #endif
 #ifndef CURRENT_SHUNT_RES
-#define CURRENT_SHUNT_RES		0.0025 // effective with 2.5 mV/A after bypass shunt
+#define CURRENT_SHUNT_RES		0.002668 // effective with 2.5 mV/A after bypass shunt
 #endif
 
 // Input voltage
