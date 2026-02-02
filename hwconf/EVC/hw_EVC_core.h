@@ -33,7 +33,7 @@
 #define HW_HAS_3_SHUNTS
 #define HW_HAS_PHASE_FILTERS
 #define HW_HAS_PHASE_SHUNTS
-#define HW_DEAD_TIME_NSEC		100
+#define HW_DEAD_TIME_NSEC		300
 
 // Macros
 #define ENABLE_GATE()			palSetPad(GPIOC, 9)
